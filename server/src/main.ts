@@ -10,18 +10,21 @@ dotenv.config();
 const PORT = parseInt(process.env.PORT || "3001", 10);
 const HOST = process.env.HOST || "0.0.0.0";
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:3000";
-const UPSTASH_REDIS_REST_URL = process.env.UPSTASH_REDIS_REST_URL;
 
 const CONNECTION_COUNT_KEY = "chat:connection-count";
 const CONNECTION_COUNT_UPDATED_CHANNEL = "chat:connection-count-updated";
 
-if (!UPSTASH_REDIS_REST_URL) {
-  console.error("Missing env variable: UPSTASH_REDIS_REST_URL");
-  process.exit(1);
-}
+const publisher = new Redis({
+  port: 6379,
+  host: process.env.REDIS_HOST,
+  password: process.env.REDIS_PASSWORD,
+});
 
-const publisher = new Redis(UPSTASH_REDIS_REST_URL);
-const subscriber = new Redis(UPSTASH_REDIS_REST_URL);
+const subscriber = new Redis({
+  port: 6379,
+  host: process.env.REDIS_HOST,
+  password: process.env.REDIS_PASSWORD,
+});
 
 let connectedClients = 0;
 
@@ -109,19 +112,19 @@ async function main() {
     });
 
     closeWithGrace({ delay: 2000 }, async ({ signal, err }) => {
-        if (connectedClients > 0) {
-          const currentCount = parseInt(
-            (await publisher.get(CONNECTION_COUNT_KEY)) || "0",
-            10
-          );
-  
-          const newCount = Math.max(currentCount - connectedClients, 0);
-  
-          await publisher.set(CONNECTION_COUNT_KEY, newCount);
-        }
-  
-        await app.close();
-      });
+      if (connectedClients > 0) {
+        const currentCount = parseInt(
+          (await publisher.get(CONNECTION_COUNT_KEY)) || "0",
+          10
+        );
+
+        const newCount = Math.max(currentCount - connectedClients, 0);
+
+        await publisher.set(CONNECTION_COUNT_KEY, newCount);
+      }
+
+      await app.close();
+    });
 
     console.log(`Server is running on ${HOST}:${PORT}`);
   } catch (e) {
