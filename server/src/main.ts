@@ -4,6 +4,7 @@ import fastify from "fastify";
 import fastifyIO from "fastify-socket.io";
 import Redis from "ioredis";
 import closeWithGrace from "close-with-grace";
+import { randomUUID } from "crypto";
 
 dotenv.config();
 
@@ -13,6 +14,7 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:3000";
 
 const CONNECTION_COUNT_KEY = "chat:connection-count";
 const CONNECTION_COUNT_UPDATED_CHANNEL = "chat:connection-count-updated";
+const NEW_MESSAGE_CHANNEL = "chat:new-message";
 
 const publisher = new Redis({
   port: 6379,
@@ -55,6 +57,15 @@ async function buildServer() {
       String(incResult)
     );
 
+    io.on(NEW_MESSAGE_CHANNEL, async (payload) => {
+      const message = payload.message;
+
+      if(!message) {
+        return;
+      }
+      await publisher.publish(NEW_MESSAGE_CHANNEL, message.toString());
+    }) 
+      
     io.on("disconnect", async () => {
       console.log("client disconnected");
       connectedClients--;
@@ -76,9 +87,23 @@ async function buildServer() {
     }
 
     console.log(
-      `${count} clients connected to ${CONNECTION_COUNT_UPDATED_CHANNEL} channel`
+      `${count} clients subscribes to ${CONNECTION_COUNT_UPDATED_CHANNEL} channel`
     );
   });
+
+  subscriber.subscribe(NEW_MESSAGE_CHANNEL, (err, count) => {
+    if (err) {
+      console.error(
+        `Error subscribing to ${NEW_MESSAGE_CHANNEL}`,
+        err
+      );
+      return;
+    }
+
+    console.log(
+      `${count} clients subscribes to ${NEW_MESSAGE_CHANNEL} channel`
+    );
+  })
 
   subscriber.on("message", (channel, text) => {
     if (channel === CONNECTION_COUNT_UPDATED_CHANNEL) {
@@ -89,7 +114,16 @@ async function buildServer() {
       return;
     }
 
-    app.io.emit("connection-count-updated", text);
+    if(channel === NEW_MESSAGE_CHANNEL) {
+      app.io.emit(NEW_MESSAGE_CHANNEL, {
+        message: text,
+        id: randomUUID(),
+        createdAt: new Date(),
+        port: PORT,
+      });
+
+      return;
+    }
   });
 
   app.get("/healthcheck", () => {
